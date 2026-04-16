@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuartoAnnotation – Annotate Quarto Presentations</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+
+<div class="app-layout">
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="{{ url_for('index') }}" class="navbar-brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+      </svg>
+      QuartoAnnotation
+    </a>
+    <div class="navbar-actions">
+      <span style="font-size:.82rem; color:var(--text-muted);">Annotate Quarto Presentations</span>
+    </div>
+  </nav>
+
+  <div class="main-content">
+
+    <!-- Hero -->
+    <div class="hero">
+      <h1>Annotate Quarto Presentations</h1>
+      <p>Upload any Quarto HTML presentation, highlight text, and save notes — all in your browser.</p>
+    </div>
+
+    <!-- Upload card -->
+    <div class="upload-card">
+      <h2>Upload a Presentation</h2>
+      <form method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+        <div class="form-group">
+          <label for="title">Title <span style="font-weight:400;opacity:.6;">(optional)</span></label>
+          <input type="text" id="title" name="title" placeholder="My Presentation" />
+        </div>
+        <div class="form-group">
+          <label for="file">HTML File <span style="color:var(--danger)">*</span></label>
+          <input type="file" id="file" name="file" accept=".html,.htm" required />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Upload &amp; Open
+        </button>
+      </form>
+    </div>
+
+    <!-- Presentations list -->
+    <div class="presentations-section">
+      <div class="section-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+        Presentations
+        <span class="badge">{{ presentations|length }}</span>
+      </div>
+
+      {% if presentations %}
+      <div class="presentation-grid">
+        {% for p in presentations %}
+        <div class="presentation-card">
+          <div class="card-title">{{ p.title }}</div>
+          <div class="card-meta">
+            <span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              {{ p.annotation_count() }} annotation{% if p.annotation_count() != 1 %}s{% endif %}
+            </span>
+            <span title="{{ p.uploaded_at.strftime('%Y-%m-%d %H:%M') }}">
+              {{ p.uploaded_at.strftime('%b %d, %Y') }}
+            </span>
+            {% if p.is_sample %}<span class="badge badge-accent">Sample</span>{% endif %}
+          </div>
+          <div class="card-actions">
+            <a href="{{ url_for('viewer', presentation_id=p.id) }}" class="btn btn-primary btn-sm">
+              Open
+            </a>
+            {% if not p.is_sample %}
+            <form method="POST" action="{{ url_for('delete_presentation', presentation_id=p.id) }}"
+                  onsubmit="return confirm('Delete this presentation and all its annotations?');"
+                  style="margin:0">
+              <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <p>No presentations yet. Upload a Quarto HTML file to get started, or open the sample below.</p>
+      </div>
+      {% endif %}
+    </div>
+
+  </div><!-- .main-content -->
+</div><!-- .app-layout -->
+
+</body>
+</html>
