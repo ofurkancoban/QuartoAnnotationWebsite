@@ -1,4 +1,6 @@
 import os
+import uuid
+import warnings
 from datetime import datetime
 from flask import (
     Flask,
@@ -14,7 +16,15 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
+_secret = os.environ.get("SECRET_KEY")
+if not _secret:
+    warnings.warn(
+        "SECRET_KEY environment variable is not set. "
+        "Using an insecure default — do NOT deploy this to production.",
+        stacklevel=1,
+    )
+    _secret = "dev-secret-key-change-in-production"
+app.config["SECRET_KEY"] = _secret
 app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL", "sqlite:///annotations.db"
 )
@@ -133,9 +143,9 @@ def upload():
         return redirect(url_for("index"))
 
     filename = secure_filename(file.filename)
-    # Make unique to avoid collisions
+    # Make unique using UUID to avoid collisions
     base, ext = os.path.splitext(filename)
-    filename = f"{base}_{int(datetime.utcnow().timestamp())}{ext}"
+    filename = f"{base}_{uuid.uuid4().hex}{ext}"
 
     file.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
 
@@ -291,4 +301,5 @@ with app.app_context():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() in ("1", "true", "yes")
+    app.run(debug=debug, host="0.0.0.0", port=5000)

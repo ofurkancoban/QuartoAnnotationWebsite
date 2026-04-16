@@ -18,7 +18,7 @@
   let PRESENTATION_ID = null;
   let annotations      = [];
   let pendingRange     = null;   // Range in the iframe document
-  let pendingColor     = 'yellow';
+  let pendingColor     = DEFAULT_COLOR;
   let editingId        = null;   // Annotation being edited
 
   /* ── DOM refs ──────────────────────────────────────────────────────────── */
@@ -35,6 +35,7 @@
   const annCount        = document.getElementById('ann-count');
 
   /* ── Colour map ────────────────────────────────────────────────────────── */
+  const DEFAULT_COLOR = 'yellow';
   const COLOR_HEX = {
     yellow: '#ffe066',
     green:  '#6ee7a0',
@@ -191,7 +192,7 @@
     });
 
     // Set default active
-    const defaultBtn = document.querySelector('.toolbar-color-btn[data-color="yellow"]');
+    const defaultBtn = document.querySelector(`.toolbar-color-btn[data-color="${DEFAULT_COLOR}"]`);
     if (defaultBtn) defaultBtn.classList.add('active');
 
     // Annotate button
@@ -429,7 +430,7 @@
     card.className = 'ann-card';
     card.dataset.annId = ann.id;
 
-    const dot = `<span class="ann-color-dot" style="background:${COLOR_HEX[ann.color] || '#ffe066'}"></span>`;
+    const dot = `<span class="ann-color-dot" style="background:${COLOR_HEX[ann.color] || COLOR_HEX[DEFAULT_COLOR]}"></span>`;
     const excerpt = escapeHtml(ann.selected_text.length > 100
       ? ann.selected_text.slice(0, 100) + '…'
       : ann.selected_text);
