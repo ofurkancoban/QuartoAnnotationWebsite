@@ -3210,7 +3210,8 @@ function sanitizeQuartoHtml(html) {
         html = html.replace(/<head([^>]*)>/i, '<head$1>' + mockInject);
     }
 
-    // Remove RevealMenu from plugins array
+    // Remove RevealMenu from plugins array - only if it causes issues, but user wants navigation
+    /* 
     html = html.replace(
         /plugins\s*:\s*\[([^\]]*)\]/g,
         function(match, inner) {
@@ -3224,6 +3225,7 @@ function sanitizeQuartoHtml(html) {
             return 'plugins: [' + cleaned + ']';
         }
     );
+    */
 
     // Disable Space key in Reveal.js keyboard config to prevent slide advance
     html = html.replace(
@@ -3262,6 +3264,24 @@ window.processFileContent = function(content, file) {
                 flex-wrap: nowrap !important;
                 align-items: center !important;
                 justify-content: center !important;
+                z-index: 9 !important; /* Extremely low to stay behind all Reveal.js UI */
+            }
+            .reveal .menu-panel, 
+            .reveal .slide-menu-button,
+            .reveal .slide-menu-panel {
+                z-index: 9999 !important;
+                max-height: 100vh !important;
+                overflow-y: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+            }
+            .indicator-settings-panel {
+                display: block !important;
+                bottom: 50px !important;
+                z-index: 1001 !important;
+            }
+            .indicator-settings-btn {
+                display: flex !important;
+                z-index: 1001 !important;
             }
             .indicator-dot {
                 width: 6px !important;
@@ -4740,6 +4760,24 @@ function exportAnnotatedPresentation() {
         flex-wrap: nowrap !important;
         align-items: center !important;
         justify-content: center !important;
+        z-index: 9 !important;
+    }
+    .reveal .menu-panel, 
+    .reveal .slide-menu-button,
+    .reveal .slide-menu-panel {
+        z-index: 9999 !important;
+        max-height: 100vh !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+    .indicator-settings-panel {
+        display: block !important;
+        bottom: 50px !important;
+        z-index: 1001 !important;
+    }
+    .indicator-settings-btn {
+        display: flex !important;
+        z-index: 1001 !important;
     }
     .indicator-dot {
         width: 6px !important;
