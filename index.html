@@ -588,6 +588,46 @@ h1, h2, h3 {
 #app[data-dock-pos="left"]   { flex-direction: row; }
 #app[data-dock-pos="right"]  { flex-direction: row-reverse; }
 
+/* Document title strip: safe-area top padding so toolbar isn’t covered by iOS status bar (top/bottom dock) */
+#app-title-bar {
+    display: none;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+    padding: max(2px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) 3px max(10px, env(safe-area-inset-left, 0px));
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(16px) saturate(1.2);
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    border-bottom: 1px solid var(--border);
+    z-index: 1550;
+}
+[data-theme="light"] #app-title-bar {
+    background: rgba(255, 255, 255, 0.82);
+}
+#app[data-dock-pos="top"] #app-title-bar,
+#app[data-dock-pos="bottom"] #app-title-bar {
+    display: flex;
+}
+#app[data-dock-pos="top"] #app-title-bar { order: 0; }
+#app[data-dock-pos="top"] #goodnotes-top-bar { order: 1; }
+#app[data-dock-pos="top"] #main-view { order: 2; }
+#app[data-dock-pos="bottom"] #goodnotes-top-bar { order: 0; }
+#app[data-dock-pos="bottom"] #app-title-bar { order: 1; }
+#app[data-dock-pos="bottom"] #main-view { order: 2; }
+.app-document-name {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    max-width: min(90vw, 640px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: 'JetBrains Mono', 'Inter', monospace;
+}
 
 /* ═══════════════════════════════════════════════
    § 4. UNIFIED ADAPTIVE TOOLBAR
@@ -617,8 +657,8 @@ h1, h2, h3 {
 
 #app[data-dock-pos="top"] #goodnotes-top-bar { 
     border-bottom: 1px solid var(--border);
-    padding-top: env(safe-area-inset-top, 0);
-    height: calc(var(--header-h) + env(safe-area-inset-top, 0));
+    padding-top: 0;
+    height: var(--header-h);
 }
 #app[data-dock-pos="bottom"] #goodnotes-top-bar { 
     border-top: 1px solid var(--border);
@@ -2191,6 +2231,7 @@ body[data-tool="highlighter"] #brush-preview {
    § 17. THEME TRANSITIONS
    ═══════════════════════════════════════════════ */
 #goodnotes-top-bar,
+#app-title-bar,
 #status-bar,
 .sidebar,
 .gn-popover,
@@ -2497,6 +2538,10 @@ body[data-tool="highlighter"] #brush-preview {
     })();
     </script>
     <div id="app">
+        <!-- Clears iPad system status (time/Wi‑Fi/battery) above toolbar in fullscreen; shows file name -->
+        <header id="app-title-bar" class="app-title-bar" role="banner">
+            <span id="app-document-name" class="app-document-name">Quarto Ink</span>
+        </header>
         <!-- MINIMAL TOP BAR -->
         <nav id="goodnotes-top-bar" class="fade-in">
             <!-- Left: Document & Nav -->
@@ -3421,6 +3466,14 @@ function goToSlide(slide) {
     } catch (e) {}
 }
 
+function syncDocumentTitleBar() {
+    const el = _$('#app-document-name');
+    if (!el) return;
+    const name = (state.currentFileName && String(state.currentFileName).trim()) || '';
+    el.textContent = name || 'Quarto Ink';
+    el.title = name || 'Quarto Ink';
+}
+
 function init() {
     canvas = _$('#canvas-overlay');
     frame = _$('#content-frame');
@@ -3435,7 +3488,8 @@ function init() {
     // Load global settings (presets, widths) at startup
     loadFromLocalStorage();
     syncModeUI();
-    
+    syncDocumentTitleBar();
+
     if(frame) {
         frame.addEventListener('load', () => {
             handleResize();
@@ -3925,7 +3979,8 @@ window.processFileContent = function(content, file) {
         : sourceForInjection + bridgeScript;
     
     state.htmlContent = content; 
-    state.currentFileName = file.name; 
+    state.currentFileName = file.name;
+    syncDocumentTitleBar();
     state.annotations.clear();
     state.currentSlide = '0-0';
     state.slideMetrics = { x: 0, y: 0, width: 1, height: 1, scale: 1 };
