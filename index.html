@@ -3030,7 +3030,9 @@ const state = {
     slideMetrics: { x: 0, y: 0, width: 1, height: 1, scale: 1 },
     freehandSnapTimer: null,
     freehandSnapped: false,
-    snapStartPoint: null
+    snapStartPoint: null,
+    /** TimeStamp of the pointerdown that opened the current stroke; stale pointerups sort before this on Safari/Pencil. */
+    strokeDownTimeStamp: null
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -4498,6 +4500,7 @@ function resetDrawingGestureState() {
     state.lastStaticP = null;
     state._fingerSwipe = null;
     state.snapshot = null;
+    state.strokeDownTimeStamp = null;
     if (canvas && pid !== undefined) {
         try { canvas.releasePointerCapture(pid); } catch (_e) {}
     }
@@ -4599,6 +4602,7 @@ function startDrawing(e) {
     
     state.isDragging = true;
     state.activePointerId = e.pointerId;
+    state.strokeDownTimeStamp = e.timeStamp;
     try { canvas.setPointerCapture(e.pointerId); } catch(_e) {}
     state.startX = p.x; state.startY = p.y; 
     const normP = toNormalized(p.x, p.y);
@@ -4629,7 +4633,14 @@ function startDrawing(e) {
     }
     
     if (state.tool === 'lasso') {
-        if (isPointInDeleteHandle(p)) { deleteSelectedAnnotations(); state.isDragging = false; return; }
+        if (isPointInDeleteHandle(p)) {
+            deleteSelectedAnnotations();
+            state.isDragging = false;
+            state.strokeDownTimeStamp = null;
+            try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+            state.activePointerId = undefined;
+            return;
+        }
         if (isPointInResizeHandle(p)) { state.isResizingSelection = true; state.resizeOrigin = { x: getSelectionBoundingBox().minX, y: getSelectionBoundingBox().minY }; }
         else if (isPointInLassoSelection(p)) { state.isMovingSelection = true; }
         else { state.selectedAnnotations = []; state.lassoPath = [p]; }
@@ -4834,9 +4845,15 @@ function draw(e) {
 function stopDrawing(e) {
     if (!state.isDragging) return;
     if (state.activePointerId !== undefined && e.pointerId !== state.activePointerId) return;
+    const tsDown = state.strokeDownTimeStamp;
+    const tsUp = e.timeStamp;
+    if (tsDown != null && Number.isFinite(tsUp) && Number.isFinite(tsDown) && tsUp < tsDown - 0.5) {
+        return;
+    }
     if (pointerUpTargetIsChromeWhileDrawing(e)) return;
     state.isDragging = false;
     state.activePointerId = undefined;
+    state.strokeDownTimeStamp = null;
     try { canvas.releasePointerCapture(e.pointerId); } catch(_e) {}
     const p = getPos(e);
     clearTimeout(state.shapeSnapTimer);
