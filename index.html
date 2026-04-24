@@ -2961,6 +2961,13 @@ function syncColorUI() {
 
 // Sync thickness button UI to match current strokeWidth and presets
 function syncThicknessUI() {
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    state.thicknessPresets.forEach((p, i) => {
+        const d = Math.abs(p - state.strokeWidth);
+        if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+    });
+    state.thicknessIndex = bestIdx;
     _$$('.gn-thickness-btn').forEach(btn => {
         const idx = parseInt(btn.dataset.index);
         const val = state.thicknessPresets[idx];
@@ -2996,7 +3003,7 @@ const state = {
     toolColors: { ...DEFAULT_TOOL_COLORS },
     strokeWidth: 1.5,
     thicknessIndex: 0,
-    thicknessPresets: [3, 8, 20],
+    thicknessPresets: [1.5, 3, 10],
     toolWidths: { pen: 1.5, highlighter: 8, eraser: 20, rect: 3, circle: 3, arrow: 3, line: 3 },
     opacity: 1,
     isFilled: false,
@@ -4472,8 +4479,38 @@ function finalizeText() {
     redraw();
 }
 
+/** Clears in-progress stroke / capture so tool switches cannot leave isDragging stuck (blocks next pointerdown). */
+function resetDrawingGestureState() {
+    clearTimeout(state.freehandSnapTimer);
+    clearTimeout(state.shapeSnapTimer);
+    state.freehandSnapTimer = null;
+    state.shapeSnapTimer = null;
+    const pid = state.activePointerId;
+    state.isDragging = false;
+    state.activePointerId = undefined;
+    state.freehandSnapped = false;
+    state.shapeSnapped = false;
+    state.shapeSnapEndPos = null;
+    state.isMovingSelection = false;
+    state.isResizingSelection = false;
+    state.currentPath = [];
+    state.lassoPath = [];
+    state.lastStaticP = null;
+    state._fingerSwipe = null;
+    if (canvas && pid !== undefined) {
+        try { canvas.releasePointerCapture(pid); } catch (_e) {}
+    }
+    if (ctx) redraw();
+}
+
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
+
+    // Inconsistent leftover flag (missed pointerup)
+    if (state.isDragging && state.activePointerId === undefined) {
+        state.isDragging = false;
+        state.currentPath = [];
+    }
 
     // Prevent multi-touch interference: only track one pointer at a time
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
@@ -5533,6 +5570,7 @@ function setupEventListeners() {
     ['lasso','pen','highlighter','arrow','rect','circle','text','eraser'].forEach(t => {
         const b = _$(`#btn-${t}`);
         if(b) b.onclick = () => {
+            resetDrawingGestureState();
             state.tool = t; document.body.dataset.tool = t;
             _$$('.gn-tool-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
             state.isDrawingMode = true; syncModeUI();
@@ -5677,6 +5715,19 @@ function setupEventListeners() {
             redraw();
             restoreBrushPreviewAfterStroke();
         }
+    });
+    canvas.addEventListener('lostpointercapture', (e) => {
+        if (state.activePointerId === undefined || state.activePointerId !== e.pointerId) return;
+        clearTimeout(state.freehandSnapTimer);
+        clearTimeout(state.shapeSnapTimer);
+        state.isDragging = false;
+        state.activePointerId = undefined;
+        state.freehandSnapped = false;
+        state.shapeSnapped = false;
+        state.currentPath = [];
+        state.lastStaticP = null;
+        redraw();
+        restoreBrushPreviewAfterStroke(e.clientX, e.clientY);
     });
     // Prevent iOS Safari from stealing touch events (double insurance with touch-action: none)
     canvas.addEventListener('touchstart', (e) => { if (state.isDrawingMode) e.preventDefault(); }, { passive: false });
