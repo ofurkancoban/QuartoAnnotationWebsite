@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <script>
     (function () {
         function syncViewportHeight() {
@@ -40,6 +40,17 @@
         }
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', afterPaint);
         else afterPaint();
+
+        /* Block pinch / double-tap zoom and keyboard zoom (app chrome only; iframe is separate) */
+        document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+        document.addEventListener('gesturechange', function (e) { e.preventDefault(); }, { passive: false });
+        document.addEventListener('gestureend', function (e) { e.preventDefault(); }, { passive: false });
+        document.addEventListener('wheel', function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+        document.addEventListener('keydown', function (e) {
+            if (!e.ctrlKey && !e.metaKey) return;
+            var k = e.key;
+            if (k === '+' || k === '-' || k === '=' || k === '_' || (k === '0' && !e.shiftKey)) e.preventDefault();
+        }, true);
     })();
     </script>
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -509,6 +520,9 @@
 html {
     height: 100%;
     height: -webkit-fill-available;
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 body {
@@ -528,6 +542,7 @@ body {
     -webkit-user-select: none; /* Global selection lock for touch experience */
     user-select: none;
     -webkit-touch-callout: none; /* Disable iOS context-menu popups on long press */
+    touch-action: manipulation;
 }
 
 /* Allow selection in inputs */
