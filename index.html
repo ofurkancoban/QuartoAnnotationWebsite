@@ -3490,7 +3490,10 @@ function init() {
     state.ui.editorArea = editorArea = _$('#editor-area');
     state.ui.editorStage = _$('#editor-stage');
     state.ui.eraserCursor = eraserCursor = _$('#eraser-cursor');
-    if (canvas) ctx = canvas.getContext('2d');
+    if (canvas) {
+        ctx = canvas.getContext('2d');
+        if (!canvas.hasAttribute('tabindex')) canvas.setAttribute('tabindex', '-1');
+    }
     
     // Load global settings (presets, widths) at startup
     loadFromLocalStorage();
@@ -4503,6 +4506,96 @@ function resetDrawingGestureState() {
     if (ctx) redraw();
 }
 
+/** After toolbar / popover interaction, return focus to the overlay so the next pen stroke is not lost to focused controls (iPad / Pencil). */
+function focusCanvasAfterChromeInteraction(el) {
+    try { if (el && typeof el.blur === 'function') el.blur(); } catch (_e) {}
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            try { if (canvas) canvas.focus({ preventScroll: true }); } catch (_e) {}
+        });
+    });
+}
+
+/**
+ * Run onApply on pointerdown (capture) so state updates before click; ignore
+ * the following duplicate click from the same gesture (keyboard keeps click-only).
+ */
+function bindPointerFirstUiClick(el, onApply) {
+    el.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        el._gnUiPtrAt = performance.now();
+        onApply();
+    }, true);
+    el.addEventListener('click', () => {
+        if (el._gnUiPtrAt != null && (performance.now() - el._gnUiPtrAt) < 450) {
+            el._gnUiPtrAt = null;
+            return;
+        }
+        el._gnUiPtrAt = null;
+        onApply();
+    });
+}
+
+function applyColorSwatch(s) {
+    const hex = s.dataset.color;
+    if (!hex) return;
+    state.toolColors[state.tool] = hex;
+    syncColorUI();
+    saveToLocalStorage();
+    if (state.selectedAnnotations && state.selectedAnnotations.length > 0) {
+        state.selectedAnnotations.forEach(ann => { ann.color = state.color; });
+        redraw(); saveToLocalStorage(); addToHistory();
+    }
+    focusCanvasAfterChromeInteraction(s);
+}
+
+function applyThicknessPresetBtn(btn) {
+    state.thicknessIndex = parseInt(btn.dataset.index, 10);
+    state.strokeWidth = state.thicknessPresets[state.thicknessIndex];
+    if (state.toolWidths[state.tool] !== undefined) {
+        state.toolWidths[state.tool] = state.strokeWidth;
+    }
+    syncThicknessUI();
+    saveToLocalStorage();
+    focusCanvasAfterChromeInteraction(btn);
+}
+
+/**
+ * Select active drawing tool. Pass fromPointer=true from pointerdown so the
+ * tool updates before the delayed 'click' — fixes first stroke using the old
+ * tool when the user switches with touch and draws immediately (e.g. Pencil
+ * on canvas before the tool button’s click event fires).
+ */
+function applyActiveTool(t, b, fromPointer) {
+    if (!fromPointer) {
+        if (b._gnPtrToolAt != null && (performance.now() - b._gnPtrToolAt) < 450) {
+            b._gnPtrToolAt = null;
+            return;
+        }
+        b._gnPtrToolAt = null;
+    } else {
+        b._gnPtrToolAt = performance.now();
+    }
+    resetDrawingGestureState();
+    state.tool = t; document.body.dataset.tool = t;
+    _$$('.gn-tool-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    state.isDrawingMode = true; syncModeUI();
+    if (state.toolWidths[t] !== undefined) {
+        state.strokeWidth = state.toolWidths[t];
+        syncThicknessUI();
+    }
+    syncColorUI();
+    const pillIcon = _$('#pill-icon');
+    const toolIcon = b.querySelector('svg');
+    if (pillIcon && toolIcon) {
+        pillIcon.innerHTML = toolIcon.innerHTML;
+        pillIcon.setAttribute('viewBox', toolIcon.getAttribute('viewBox') || '0 0 24 24');
+    }
+    _$$('.gn-text-only').forEach(el => el.style.display = (t === 'text') ? 'block' : 'none');
+    focusCanvasAfterChromeInteraction(b);
+}
+
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
 
@@ -4510,6 +4603,16 @@ function startDrawing(e) {
     if (state.isDragging && state.activePointerId === undefined) {
         state.isDragging = false;
         state.currentPath = [];
+    }
+
+    // New pointer while another session was left active (e.g. missed pointerup) — recover instead of blocking
+    if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) {
+        resetDrawingGestureState();
+    }
+
+    // Missed pointerup (common on tablets) leaves isDragging+same id; new pointerdown would stack — reset first
+    if (state.isDragging && state.activePointerId === e.pointerId) {
+        resetDrawingGestureState();
     }
 
     // Prevent multi-touch interference: only track one pointer at a time
@@ -4578,7 +4681,14 @@ function startDrawing(e) {
     state.lastStaticP = p; 
 
     // Take snapshot BEFORE any drawing to avoid overlapping alpha for highlighters
-    state.snapshot = ctx.getImageData(0,0,canvas.width,canvas.height);
+    try {
+        state.snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    } catch (err) {
+        state.isDragging = false;
+        state.activePointerId = undefined;
+        state.currentPath = [];
+        return;
+    }
     // Do not paint a single-point disk here: it stays visible for pen/eraser (no full-canvas
     // refresh each move) and can stack with the stroke. Live ink starts on pointermove; a
     // tap-only stroke is finalized in stopDrawing + redraw via renderPath one-point branch.
@@ -5569,45 +5679,17 @@ function setupEventListeners() {
 
     ['lasso','pen','highlighter','arrow','rect','circle','text','eraser'].forEach(t => {
         const b = _$(`#btn-${t}`);
-        if(b) b.onclick = () => {
-            resetDrawingGestureState();
-            state.tool = t; document.body.dataset.tool = t;
-            _$$('.gn-tool-btn').forEach(x => x.classList.remove('active')); b.classList.add('active');
-            state.isDrawingMode = true; syncModeUI();
-            // Restore per-tool thickness
-            if (state.toolWidths[t] !== undefined) {
-                state.strokeWidth = state.toolWidths[t];
-                syncThicknessUI();
-            }
-            syncColorUI();
-            // Update active icon in the settings pill (Visual only, no color change)
-            const pillIcon = _$('#pill-icon');
-            const toolIcon = b.querySelector('svg');
-            if (pillIcon && toolIcon) {
-                pillIcon.innerHTML = toolIcon.innerHTML;
-                pillIcon.setAttribute('viewBox', toolIcon.getAttribute('viewBox') || '0 0 24 24');
-            }
-            _$$('.gn-text-only').forEach(el => el.style.display = (t === 'text') ? 'block' : 'none');
-        };
+        if (!b) return;
+        b.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            applyActiveTool(t, b, true);
+        }, true);
+        b.addEventListener('click', () => { applyActiveTool(t, b, false); });
     });
 
     _$$('.gn-color-swatch').forEach(s => {
         if (s.classList.contains('custom-picker-btn')) return;
-        s.onclick = () => {
-            const hex = s.dataset.color;
-            if (!hex) return;
-            state.toolColors[state.tool] = hex;
-            syncColorUI();
-            saveToLocalStorage();
-
-            // Apply to selected annotations if any
-            if (state.selectedAnnotations && state.selectedAnnotations.length > 0) {
-                state.selectedAnnotations.forEach(ann => {
-                    ann.color = state.color;
-                });
-                redraw(); saveToLocalStorage(); addToHistory();
-            }
-        };
+        bindPointerFirstUiClick(s, () => applyColorSwatch(s));
     });
     
     _on('#color-custom', 'input', (e) => {
@@ -5622,18 +5704,11 @@ function setupEventListeners() {
             });
             redraw(); saveToLocalStorage(); addToHistory();
         }
+        focusCanvasAfterChromeInteraction(e.target);
     });
 
     _$$('.gn-thickness-btn').forEach(btn => {
-        btn.onclick = () => {
-            state.thicknessIndex = parseInt(btn.dataset.index);
-            state.strokeWidth = state.thicknessPresets[state.thicknessIndex];
-            if (state.toolWidths[state.tool] !== undefined) {
-                state.toolWidths[state.tool] = state.strokeWidth;
-            }
-            syncThicknessUI();
-            saveToLocalStorage();
-        };
+        bindPointerFirstUiClick(btn, () => applyThicknessPresetBtn(btn));
     });
 
     _on('#stroke-width-slider', 'input', (e) => {
@@ -5645,6 +5720,7 @@ function setupEventListeners() {
         }
         syncThicknessUI();
         saveToLocalStorage();
+        focusCanvasAfterChromeInteraction(e.target);
     });
 
     _on('#btn-tool-settings', 'click', (e) => {
@@ -5671,15 +5747,25 @@ function setupEventListeners() {
     // Final stage log
     window.log('UI ready for interaction.');
 
-    _on('#stroke-opacity', 'input', (e) => { state.opacity = parseFloat(e.target.value); });
+    _on('#stroke-opacity', 'input', (e) => {
+        state.opacity = parseFloat(e.target.value);
+        focusCanvasAfterChromeInteraction(e.target);
+    });
     _on('#font-family', 'change', (e) => state.fontFamily = e.target.value);
     _on('#font-size-input', 'input', (e) => state.fontSize = parseInt(e.target.value));
-    _on('#fill-toggle', 'change', (e) => { state.isFilled = e.target.checked; });
-
-    _on('#btn-nav-mode', 'click', () => {
-        state.isDrawingMode = !state.isDrawingMode;
-        syncModeUI();
+    _on('#fill-toggle', 'change', (e) => {
+        state.isFilled = e.target.checked;
+        focusCanvasAfterChromeInteraction(e.target);
     });
+
+    const navModeBtn = _$('#btn-nav-mode');
+    if (navModeBtn) {
+        bindPointerFirstUiClick(navModeBtn, () => {
+            state.isDrawingMode = !state.isDrawingMode;
+            syncModeUI();
+            focusCanvasAfterChromeInteraction(navModeBtn);
+        });
+    }
 
     // iPad Optimization: Disable long-press context menu on drawing area
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -5703,7 +5789,7 @@ function setupEventListeners() {
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false });
     canvas.addEventListener('pointermove', draw, { passive: false });
-    window.addEventListener('pointerup', stopDrawing);
+    window.addEventListener('pointerup', stopDrawing, { capture: true });
     canvas.addEventListener('pointercancel', (e) => {
         if (state.isDragging) {
             state.isDragging = false;
@@ -5716,19 +5802,9 @@ function setupEventListeners() {
             restoreBrushPreviewAfterStroke();
         }
     });
-    canvas.addEventListener('lostpointercapture', (e) => {
-        if (state.activePointerId === undefined || state.activePointerId !== e.pointerId) return;
-        clearTimeout(state.freehandSnapTimer);
-        clearTimeout(state.shapeSnapTimer);
-        state.isDragging = false;
-        state.activePointerId = undefined;
-        state.freehandSnapped = false;
-        state.shapeSnapped = false;
-        state.currentPath = [];
-        state.lastStaticP = null;
-        redraw();
-        restoreBrushPreviewAfterStroke(e.clientX, e.clientY);
-    });
+    // Do NOT clear active stroke state in lostpointercapture: a stale event can run after
+    // programmatic releasePointerCapture (tool/colour change) and wipe the *next* stroke
+    // that just called setPointerCapture (same pointer id). Teardown is handled by pointerup / pointercancel.
     // Prevent iOS Safari from stealing touch events (double insurance with touch-action: none)
     canvas.addEventListener('touchstart', (e) => { if (state.isDrawingMode) e.preventDefault(); }, { passive: false });
     canvas.addEventListener('touchmove', (e) => { if (state.isDrawingMode) e.preventDefault(); }, { passive: false });
