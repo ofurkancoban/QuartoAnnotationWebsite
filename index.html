@@ -3030,7 +3030,9 @@ const state = {
     slideMetrics: { x: 0, y: 0, width: 1, height: 1, scale: 1 },
     freehandSnapTimer: null,
     freehandSnapped: false,
-    snapStartPoint: null
+    snapStartPoint: null,
+    /** After toolbar/color focus, touch→draw must win over finger-swipe heuristic (ms, performance.now). */
+    suppressTouchNavUntil: 0
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -4508,12 +4510,18 @@ function resetDrawingGestureState() {
 
 /** After toolbar / popover interaction, return focus to the overlay so the next pen stroke is not lost to focused controls (iPad / Pencil). */
 function focusCanvasAfterChromeInteraction(el) {
+    state.suppressTouchNavUntil = performance.now() + 900;
     try { if (el && typeof el.blur === 'function') el.blur(); } catch (_e) {}
+    const doFocus = () => {
+        try { if (canvas) canvas.focus({ preventScroll: true }); } catch (_e) {}
+    };
+    doFocus();
     requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            try { if (canvas) canvas.focus({ preventScroll: true }); } catch (_e) {}
-        });
+        doFocus();
+        requestAnimationFrame(doFocus);
     });
+    setTimeout(doFocus, 0);
+    setTimeout(doFocus, 32);
 }
 
 /**
@@ -4529,6 +4537,7 @@ function bindPointerFirstUiClick(el, onApply) {
     el.addEventListener('click', () => {
         if (el._gnUiPtrAt != null && (performance.now() - el._gnUiPtrAt) < 450) {
             el._gnUiPtrAt = null;
+            focusCanvasAfterChromeInteraction(null);
             return;
         }
         el._gnUiPtrAt = null;
@@ -4570,6 +4579,7 @@ function applyActiveTool(t, b, fromPointer) {
     if (!fromPointer) {
         if (b._gnPtrToolAt != null && (performance.now() - b._gnPtrToolAt) < 450) {
             b._gnPtrToolAt = null;
+            focusCanvasAfterChromeInteraction(null);
             return;
         }
         b._gnPtrToolAt = null;
@@ -4599,12 +4609,22 @@ function applyActiveTool(t, b, fromPointer) {
 /**
  * iPad/Safari often reports Apple Pencil with pointerType "touch" (not "pen").
  * Large contact = finger → slide swipes. Slim tip and/or pressure = stylus → allow drawing.
+ * First event often has width/height 0; treating that as a fat finger blocked the first stroke
+ * (common right after a toolbar / color change when drawing immediately).
+ * If either axis is 0, geometry is incomplete — do not map to "finger swipe" (Pencil is common here).
  */
 function isPointerTouchForSlideNavigationOnly(p) {
     if (p.pointerType !== 'touch') return false;
-    if (p.width > 3.5 || p.height > 3.5) return true;
+    const w = typeof p.width === 'number' ? p.width : 0;
+    const h = typeof p.height === 'number' ? p.height : 0;
+    if (w <= 0 || h <= 0) return false;
+    const mn = Math.min(w, h), mx = Math.max(w, h);
+    // Pencil reported as touch often has an elongated contact ellipse; fat finger is ~round.
+    if (mn > 0 && mx / mn >= 1.35) return false;
+    if (w > 3.5 || h > 3.5) return true;
     if (p.pressure > 0) return false;
-    if (p.width > 0 && p.width <= 3.5) return false;
+    if (w > 0 && w <= 3.5) return false;
+    if (h > 0 && h <= 3.5) return false;
     return true;
 }
 
@@ -4661,7 +4681,8 @@ function startDrawing(e) {
     }
 
     // Finger (fat touch): slide swipes. Pencil often arrives as pointerType "touch" — must not take this path.
-    if (e.pointerType === 'touch' && isPointerTouchForSlideNavigationOnly(e)) {
+    const skipFingerNavHeuristic = performance.now() < state.suppressTouchNavUntil;
+    if (e.pointerType === 'touch' && !skipFingerNavHeuristic && isPointerTouchForSlideNavigationOnly(e)) {
         e.preventDefault();
         state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
         try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
