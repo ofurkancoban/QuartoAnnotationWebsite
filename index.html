@@ -4596,6 +4596,26 @@ function applyActiveTool(t, b, fromPointer) {
     focusCanvasAfterChromeInteraction(b);
 }
 
+/**
+ * iPad/Safari often reports Apple Pencil with pointerType "touch" (not "pen").
+ * Large contact = finger → slide swipes. Slim tip and/or pressure = stylus → allow drawing.
+ */
+function isPointerTouchForSlideNavigationOnly(p) {
+    if (p.pointerType !== 'touch') return false;
+    if (p.width > 3.5 || p.height > 3.5) return true;
+    if (p.pressure > 0) return false;
+    if (p.width > 0 && p.width <= 3.5) return false;
+    return true;
+}
+
+function isCanvasTouchEventSafeForPencil(touch) {
+    if (!touch) return true;
+    if (touch.touchType === 'stylus') return true;
+    if (typeof touch.force === 'number' && touch.force > 0) return true;
+    if (typeof touch.radiusX === 'number' && touch.radiusX > 0 && touch.radiusX < 3) return true;
+    return false;
+}
+
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
 
@@ -4640,8 +4660,8 @@ function startDrawing(e) {
         }
     }
 
-    // Finger: slide swipes only (pen/mouse draw). Tracked globally; see onFingerSwipePointerUp.
-    if (e.pointerType === 'touch') {
+    // Finger (fat touch): slide swipes. Pencil often arrives as pointerType "touch" — must not take this path.
+    if (e.pointerType === 'touch' && isPointerTouchForSlideNavigationOnly(e)) {
         e.preventDefault();
         state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
         try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
@@ -4715,7 +4735,10 @@ function startDrawing(e) {
 }
 
 function draw(e) {
-    if (e.pointerType === 'touch') { e.preventDefault(); return; }
+    if (e.pointerType === 'touch' && !state.isDragging) {
+        e.preventDefault();
+        return;
+    }
     // Ignore events from other pointers during active drawing
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
     e.preventDefault();
@@ -4723,10 +4746,9 @@ function draw(e) {
     const p = getPos(e);
     
     // Custom tool cursor - show for mouse always, for stylus only eraser indicator
-    const isPen = e.pointerType === 'pen';
     const isMouse = e.pointerType === 'mouse';
     const showFullCursor = state.isDrawingMode && isMouse;
-    const showEraserOnStylus = state.isDrawingMode && isPen && state.tool === 'eraser';
+    const showEraserOnStylus = state.isDrawingMode && (e.pointerType === 'pen' || e.pointerType === 'touch') && state.tool === 'eraser';
 
     if (showFullCursor || showEraserOnStylus) {
         const c = eraserCursor;
@@ -5805,10 +5827,15 @@ function setupEventListeners() {
     // Do NOT clear active stroke state in lostpointercapture: a stale event can run after
     // programmatic releasePointerCapture (tool/colour change) and wipe the *next* stroke
     // that just called setPointerCapture (same pointer id). Teardown is handled by pointerup / pointercancel.
-    // Prevent iOS Safari from stealing touch events (double insurance with touch-action: none)
-    canvas.addEventListener('touchstart', (e) => { if (state.isDrawingMode) e.preventDefault(); }, { passive: false });
-    canvas.addEventListener('touchmove', (e) => { if (state.isDrawingMode) e.preventDefault(); }, { passive: false });
-    canvas.addEventListener('touchend', (e) => { if (state.isDrawingMode) e.preventDefault(); }, { passive: false });
+    // iOS: do not preventDefault on Pencil’s parallel Touch events — that can break the Pointer stream.
+    function canvasTouchBlockScroll(tEv) {
+        if (!state.isDrawingMode) return;
+        if (tEv.touches && tEv.touches[0] && isCanvasTouchEventSafeForPencil(tEv.touches[0])) return;
+        tEv.preventDefault();
+    }
+    canvas.addEventListener('touchstart', canvasTouchBlockScroll, { passive: false });
+    canvas.addEventListener('touchmove', canvasTouchBlockScroll, { passive: false });
+    canvas.addEventListener('touchend', (e) => { if (state.isDrawingMode && e.changedTouches[0] && isCanvasTouchEventSafeForPencil(e.changedTouches[0])) return; e.preventDefault(); }, { passive: false });
 
     canvas.addEventListener('pointerleave', () => { 
         const ec = _$('#eraser-cursor');
