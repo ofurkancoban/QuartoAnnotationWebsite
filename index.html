@@ -3031,8 +3031,6 @@ const state = {
     freehandSnapTimer: null,
     freehandSnapped: false,
     snapStartPoint: null,
-    /** After toolbar/color focus, touch→draw must win over finger-swipe heuristic (ms, performance.now). */
-    suppressTouchNavUntil: 0
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -4217,48 +4215,6 @@ function fallbackNavigateSlide(dir) {
     }
 }
 
-function tryNavigateFromSwipe(dx, dy, dt) {
-    const minD = 56;
-    const maxT = 700;
-    const ratio = 1.15;
-    if (dt > maxT) return;
-    const ax = Math.abs(dx);
-    const ay = Math.abs(dy);
-    if (ax < minD && ay < minD) return;
-    if (ax > ay * ratio) {
-        if (dx < 0) navigateSlide('Next');
-        else navigateSlide('Prev');
-    } else if (ay > ax * ratio) {
-        if (dy < 0) navigateSlide('Next');
-        else navigateSlide('Prev');
-    }
-}
-
-function onFingerSwipePointerMove(e) {
-    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid || e.pointerType !== 'touch') return;
-    const s = state._fingerSwipe;
-    const dx = e.clientX - s.x0;
-    const dy = e.clientY - s.y0;
-    const ax = Math.abs(dx);
-    const ay = Math.abs(dy);
-    if (Math.max(ax, ay) > 22 && (ax > ay * 1.1 || ay > ax * 1.1)) e.preventDefault();
-}
-
-function onFingerSwipePointerUp(e) {
-    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
-    const s = state._fingerSwipe;
-    state._fingerSwipe = null;
-    try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
-    const dt = performance.now() - s.t0;
-    tryNavigateFromSwipe(e.clientX - s.x0, e.clientY - s.y0, dt);
-}
-
-function onFingerSwipePointerCancel(e) {
-    if (!state._fingerSwipe || e.pointerId !== state._fingerSwipe.pid) return;
-    state._fingerSwipe = null;
-    try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
-}
-
 function navigateSlide(dir) {
     if (!frame || !frame.contentWindow) {
         window.log('Navigation failed: content frame not ready', 'error');
@@ -4453,16 +4409,14 @@ function resetDrawingGestureState() {
     state.currentPath = [];
     state.lassoPath = [];
     state.lastStaticP = null;
-    state._fingerSwipe = null;
     if (canvas && pid !== undefined) {
         try { canvas.releasePointerCapture(pid); } catch (_e) {}
     }
     if (ctx) redraw();
 }
 
-/** After toolbar / popover interaction, prime canvas for the next stroke (minimal work — blur/extra focus delays hurt iPad Pencil). */
+/** After toolbar / popover interaction, prime canvas for the next stroke. */
 function focusCanvasAfterChromeInteraction(_el) {
-    state.suppressTouchNavUntil = performance.now() + 550;
     try { if (canvas) canvas.focus({ preventScroll: true }); } catch (_e) {}
 }
 
@@ -4548,28 +4502,6 @@ function applyActiveTool(t, b, fromPointer) {
     focusCanvasAfterChromeInteraction(b);
 }
 
-/**
- * iPad/Safari often reports Apple Pencil with pointerType "touch" (not "pen").
- * Large contact = finger → slide swipes. Slim tip and/or pressure = stylus → allow drawing.
- * First event often has width/height 0; treating that as a fat finger blocked the first stroke
- * (common right after a toolbar / color change when drawing immediately).
- * If either axis is 0, geometry is incomplete — do not map to "finger swipe" (Pencil is common here).
- */
-function isPointerTouchForSlideNavigationOnly(p) {
-    if (p.pointerType !== 'touch') return false;
-    const w = typeof p.width === 'number' ? p.width : 0;
-    const h = typeof p.height === 'number' ? p.height : 0;
-    if (w <= 0 || h <= 0) return false;
-    const mn = Math.min(w, h), mx = Math.max(w, h);
-    // Pencil reported as touch often has an elongated contact ellipse; fat finger is ~round.
-    if (mn > 0 && mx / mn >= 1.35) return false;
-    if (w > 3.5 || h > 3.5) return true;
-    if (p.pressure > 0) return false;
-    if (w > 0 && w <= 3.5) return false;
-    if (h > 0 && h <= 3.5) return false;
-    return true;
-}
-
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
 
@@ -4593,17 +4525,10 @@ function startDrawing(e) {
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
 
     // Do not turn canvas pointerdown into Quarto tab clicks while drawing: tab strips lie under this overlay.
-    // That path swallowed strokes (often the first line after chrome interaction when still aiming near the tab row).
     // Switch tabs in Navigation mode (canvas lets events through to the iframe).
-
-    // Finger (fat touch): slide swipes. Pencil often arrives as pointerType "touch" — must not take this path.
-    const skipFingerNavHeuristic = performance.now() < state.suppressTouchNavUntil;
-    if (e.pointerType === 'touch' && !skipFingerNavHeuristic && isPointerTouchForSlideNavigationOnly(e)) {
-        e.preventDefault();
-        state._fingerSwipe = { x0: e.clientX, y0: e.clientY, t0: performance.now(), pid: e.pointerId };
-        try { canvas.setPointerCapture(e.pointerId); } catch (_e) {}
-        return;
-    }
+    //
+    // No "finger vs Pencil" swipe heuristic on canvas: iPadOS often reports Pencil as pointerType "touch", so
+    // that path left isDragging false and the stroke never started. Use slide nav buttons or Nav mode to swipe.
 
     e.preventDefault();
     if (state.isTyping) finalizeText();
@@ -5780,9 +5705,6 @@ function setupEventListeners() {
     });
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('pointermove', onFingerSwipePointerMove, { capture: true, passive: false });
-    window.addEventListener('pointerup', onFingerSwipePointerUp, true);
-    window.addEventListener('pointercancel', onFingerSwipePointerCancel, true);
 }
 
 function handleKeyDown(e) {
