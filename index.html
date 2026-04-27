@@ -3032,8 +3032,7 @@ const state = {
     freehandSnapped: false,
     snapStartPoint: null,
     /** After toolbar/color focus, touch→draw must win over finger-swipe heuristic (ms, performance.now). */
-    suppressTouchNavUntil: 0,
-    deferredChromeBlurTimer: null
+    suppressTouchNavUntil: 0
 };
 
 // --- COORDINATE NORMALIZATION ---
@@ -4509,24 +4508,10 @@ function resetDrawingGestureState() {
     if (ctx) redraw();
 }
 
-/** After toolbar / popover interaction, return focus to the overlay so the next pen stroke is not lost to focused controls (iPad / Pencil). */
-function focusCanvasAfterChromeInteraction(el) {
-    state.suppressTouchNavUntil = performance.now() + 1400;
-    if (state.deferredChromeBlurTimer != null) {
-        clearTimeout(state.deferredChromeBlurTimer);
-        state.deferredChromeBlurTimer = null;
-    }
-    const toBlur = el;
-    // iPadOS: synchronous blur() + repeated canvas.focus() in the same tick as the toolbar pointer
-    // can “eat” the next stylus contact (user must wait). One focus, blur deferred past that gesture.
+/** After toolbar / popover interaction, prime canvas for the next stroke (minimal work — blur/extra focus delays hurt iPad Pencil). */
+function focusCanvasAfterChromeInteraction(_el) {
+    state.suppressTouchNavUntil = performance.now() + 550;
     try { if (canvas) canvas.focus({ preventScroll: true }); } catch (_e) {}
-    requestAnimationFrame(() => {
-        try { if (canvas) canvas.focus({ preventScroll: true }); } catch (_e) {}
-    });
-    state.deferredChromeBlurTimer = setTimeout(() => {
-        state.deferredChromeBlurTimer = null;
-        try { if (toBlur && typeof toBlur.blur === 'function') toBlur.blur(); } catch (_e) {}
-    }, 320);
 }
 
 /**
