@@ -4628,14 +4628,6 @@ function isPointerTouchForSlideNavigationOnly(p) {
     return true;
 }
 
-function isCanvasTouchEventSafeForPencil(touch) {
-    if (!touch) return true;
-    if (touch.touchType === 'stylus') return true;
-    if (typeof touch.force === 'number' && touch.force > 0) return true;
-    if (typeof touch.radiusX === 'number' && touch.radiusX > 0 && touch.radiusX < 3) return true;
-    return false;
-}
-
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
 
@@ -5848,15 +5840,9 @@ function setupEventListeners() {
     // Do NOT clear active stroke state in lostpointercapture: a stale event can run after
     // programmatic releasePointerCapture (tool/colour change) and wipe the *next* stroke
     // that just called setPointerCapture (same pointer id). Teardown is handled by pointerup / pointercancel.
-    // iOS: do not preventDefault on Pencil’s parallel Touch events — that can break the Pointer stream.
-    function canvasTouchBlockScroll(tEv) {
-        if (!state.isDrawingMode) return;
-        if (tEv.touches && tEv.touches[0] && isCanvasTouchEventSafeForPencil(tEv.touches[0])) return;
-        tEv.preventDefault();
-    }
-    canvas.addEventListener('touchstart', canvasTouchBlockScroll, { passive: false });
-    canvas.addEventListener('touchmove', canvasTouchBlockScroll, { passive: false });
-    canvas.addEventListener('touchend', (e) => { if (state.isDrawingMode && e.changedTouches[0] && isCanvasTouchEventSafeForPencil(e.changedTouches[0])) return; e.preventDefault(); }, { passive: false });
+    // Do NOT call preventDefault on canvas TouchEvents: #canvas-overlay already has touch-action:none, and
+    // iPadOS Safari uses TouchEvent + PointerEvent together for Pencil — preventDefault on the first ambiguous
+    // touch sample (radius/force still 0) breaks synthesis so pointerdown/move never start drawing.
 
     canvas.addEventListener('pointerleave', () => { 
         const ec = _$('#eraser-cursor');
