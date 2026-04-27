@@ -1328,7 +1328,7 @@ h1, h2, h3 {
     inset: 0;
     width: 100%;
     height: 100%;
-    z-index: 10;
+    z-index: 100;
     touch-action: none;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
@@ -1345,7 +1345,7 @@ h1, h2, h3 {
     border: none;
     outline: none;
     resize: both;
-    z-index: 20;
+    z-index: 150;
     display: none;
 }
 
@@ -1356,7 +1356,7 @@ h1, h2, h3 {
 #eraser-cursor {
     position: absolute;
     pointer-events: none;
-    z-index: 15;
+    z-index: 120;
     display: none;
     transform: translate(-50%, -50%);
     filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
@@ -3037,11 +3037,10 @@ const state = {
     strokeFromDirectTouch: false
 };
 
-/** True for iPad/iPhone (and iPad-as-Mac UA); ink uses TouchEvent path, not PointerEvent pen/touch. */
-const GN_IS_TOUCH_HOST = typeof window !== 'undefined' && 'ontouchstart' in window && (
-    /iPad|iPhone|iPod|Android/i.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-);
+/** Any touch-capable device: primary ink via TouchEvent shim (Pointer pen/touch ignored to avoid ghost/double input). */
+const GN_TOUCH_INK_BRIDGE = typeof window !== 'undefined' &&
+    'ontouchstart' in window &&
+    navigator.maxTouchPoints > 0;
 
 function gnSynthPointerFromTouch(touch) {
     return {
@@ -3059,7 +3058,7 @@ function gnSynthPointerFromTouch(touch) {
 var gnInkActiveTouchId = null;
 
 function gnInkTouchStart(ev) {
-    if (!GN_IS_TOUCH_HOST || !state.isDrawingMode) return;
+    if (!GN_TOUCH_INK_BRIDGE || !state.isDrawingMode) return;
     if (ev.touches.length !== 1) return;
     ev.preventDefault();
     gnInkActiveTouchId = ev.touches[0].identifier;
@@ -3067,7 +3066,7 @@ function gnInkTouchStart(ev) {
 }
 
 function gnInkTouchMove(ev) {
-    if (!GN_IS_TOUCH_HOST || gnInkActiveTouchId === null) return;
+    if (!GN_TOUCH_INK_BRIDGE || gnInkActiveTouchId === null) return;
     if (!state.isDragging) {
         gnInkActiveTouchId = null;
         return;
@@ -3079,7 +3078,7 @@ function gnInkTouchMove(ev) {
 }
 
 function gnInkTouchEnd(ev) {
-    if (!GN_IS_TOUCH_HOST || gnInkActiveTouchId === null) return;
+    if (!GN_TOUCH_INK_BRIDGE || gnInkActiveTouchId === null) return;
     const t = Array.prototype.find.call(ev.changedTouches, function (x) { return x.identifier === gnInkActiveTouchId; });
     if (!t) return;
     gnInkActiveTouchId = null;
@@ -3088,7 +3087,7 @@ function gnInkTouchEnd(ev) {
 }
 
 function gnInkTouchCancel(ev) {
-    if (!GN_IS_TOUCH_HOST || gnInkActiveTouchId === null) return;
+    if (!GN_TOUCH_INK_BRIDGE || gnInkActiveTouchId === null) return;
     if (!Array.prototype.some.call(ev.changedTouches, function (x) { return x.identifier === gnInkActiveTouchId; })) return;
     gnInkActiveTouchId = null;
     if (state.isDragging) resetDrawingGestureState();
@@ -3546,6 +3545,10 @@ function handleResize() {
     const eaDisp = editorArea && (editorArea.style.display || window.getComputedStyle(editorArea).display);
     if (editorArea && stage && eaDisp && eaDisp !== 'none') {
         const rect = stage.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) {
+            requestAnimationFrame(handleResize);
+            return;
+        }
         if (state.lastCanvasSize.w === rect.width && state.lastCanvasSize.h === rect.height) return;
         state.lastCanvasSize = { w: rect.width, h: rect.height };
         const dpr = window.devicePixelRatio || 1;
@@ -4058,7 +4061,12 @@ window.processFileContent = function(content, file) {
     const ea = _$('#editor-area');
     if(dz) dz.style.display = 'none';
     if(ea) ea.style.display = 'flex';
-    
+    handleResize();
+    requestAnimationFrame(function () {
+        handleResize();
+        requestAnimationFrame(handleResize);
+    });
+
     // 3. Injection Strategy
     // Use Blob URLs as the primary load path. This keeps large files stable while
     // still allowing relative assets to resolve through the injected <base> tag.
@@ -4569,7 +4577,7 @@ function applyActiveTool(t, b, fromPointer) {
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (GN_IS_TOUCH_HOST && e.pointerType !== 'mouse' && !e._gnFromTouchShim) return;
+    if (GN_TOUCH_INK_BRIDGE && e.pointerType !== 'mouse' && !e._gnFromTouchShim) return;
 
     if (state.isDragging && state.activePointerId === undefined) {
         state.isDragging = false;
@@ -5756,7 +5764,7 @@ function setupEventListeners() {
     });
 
     canvas.addEventListener('pointerdown', startDrawing, { passive: false, capture: true });
-    if (GN_IS_TOUCH_HOST) {
+    if (GN_TOUCH_INK_BRIDGE) {
         canvas.addEventListener('touchstart', gnInkTouchStart, { passive: false, capture: true });
         canvas.addEventListener('touchmove', gnInkTouchMove, { passive: false, capture: true });
         canvas.addEventListener('touchend', gnInkTouchEnd, { passive: false, capture: true });
