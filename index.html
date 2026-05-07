@@ -5532,21 +5532,36 @@ window.processFileContent = function(content, file) {
                     }
 
                     function getActiveTabScope() {
-                        let root = document.body;
+                        var root = document.body;
                         try {
                             if (window.Reveal && typeof window.Reveal.getCurrentSlide === 'function') {
-                                const slideEl = window.Reveal.getCurrentSlide();
+                                var slideEl = window.Reveal.getCurrentSlide();
                                 if (slideEl) root = slideEl;
                             }
                         } catch (_e) {}
-                        const activeTabs = Array.from(root.querySelectorAll('[role="tab"][aria-selected="true"]'));
+
+                        // Broad search for active elements that might be tabs
+                        // Quarto/Bootstrap uses .active, aria-selected="true", or .show for active tabs/panels
+                        var activeSelector = '.active, [aria-selected="true"], .show, .tabby-toggle[aria-expanded="true"]';
+                        var candidates = Array.from(root.querySelectorAll(activeSelector));
+                        
+                        // Filter for elements that match our known tab selectors or have a tab role
+                        var activeTabs = candidates.filter(function(el) {
+                            return el.matches(TAB_PROXY_SELECTOR) || el.getAttribute('role') === 'tab';
+                        });
+
                         if (activeTabs.length === 0) return '';
-                        return activeTabs.map((tab, index) => {
-                            const id = tab.getAttribute('id') || '';
-                            const href = tab.getAttribute('href') || '';
-                            const label = (tab.textContent || '').trim();
+                        
+                        var scopeParts = activeTabs.map(function(tab, index) {
+                            var id = tab.getAttribute('id') || '';
+                            var href = tab.getAttribute('href') || '';
+                            var label = (tab.textContent || '').trim().substring(0, 30);
+                            // If no ID/href/label, use its position in the list to help uniqueness
                             return [id || ('tab-' + index), href, label].filter(Boolean).join('|');
-                        }).join('::');
+                        });
+                        
+                        // Sort parts to ensure the same set of active tabs always produces the same key
+                        return scopeParts.sort().join('::');
                     }
 
                     window.__annotatorGetActiveTabScope = getActiveTabScope;
@@ -5740,24 +5755,47 @@ window.processFileContent = function(content, file) {
                         window.Reveal.on('slidetransitionend', () => notify(false));
                         window.Reveal.on('ready', () => notify(true));
 
-                        // Tab / ARIA changes detection (for Quarto panel-tabset and Bootstrap tabs)
+                        // Global click listener for tab-like elements to catch transitions
+                        // that might not trigger standard events or expected attribute changes.
+                        document.addEventListener('click', function(e) {
+                            var target = e.target;
+                            if (target && target.closest && target.closest(TAB_PROXY_SELECTOR)) {
+                                // Delay slightly to allow the underlying tab system (Bootstrap/Tabby) to update the DOM
+                                setTimeout(function() {
+                                    var newScope = getActiveTabScope();
+                                    window.parent.postMessage({
+                                        type: 'TAB_CHANGED',
+                                        tabScope: newScope
+                                    }, '*');
+                                    notify(false);
+                                }, 100);
+                            }
+                        }, true);
+
+                        // Fallback: Continue monitoring ARIA/Class changes in case of programmatic tab switches
                         var tabObserver = new MutationObserver(function(mutations) {
-                            var changed = false;
+                            var needsUpdate = false;
                             for (var i = 0; i < mutations.length; i++) {
-                                if (mutations[i].attributeName === 'aria-selected') {
-                                    changed = true;
+                                var attr = mutations[i].attributeName;
+                                if (attr === 'aria-selected' || attr === 'class' || attr === 'aria-expanded') {
+                                    needsUpdate = true;
                                     break;
                                 }
                             }
-                            if (changed) {
+                            if (needsUpdate) {
+                                var newScope = getActiveTabScope();
                                 window.parent.postMessage({
                                     type: 'TAB_CHANGED',
-                                    tabScope: getActiveTabScope()
+                                    tabScope: newScope
                                 }, '*');
                                 notify(false);
                             }
                         });
-                        tabObserver.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-selected'] });
+                        tabObserver.observe(document.body, { 
+                            attributes: true, 
+                            subtree: true, 
+                            attributeFilter: ['aria-selected', 'class', 'aria-expanded'] 
+                        });
 
                         document.addEventListener('tabby', () => {
                             window.parent.postMessage({
@@ -6258,6 +6296,7 @@ window.addEventListener('message', e => {
         });
     }
     if (e.data.type === 'TAB_CHANGED') {
+        console.log('[Parent] TAB_CHANGED received, scope:', e.data.tabScope);
         flushExcalidrawSceneToStorageForCurrentKey();
         if (setCurrentTabScope(e.data.tabScope)) {
             redraw();
