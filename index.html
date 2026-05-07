@@ -5739,6 +5739,26 @@ window.processFileContent = function(content, file) {
                         window.Reveal.on('slidechanged', () => notify(false));
                         window.Reveal.on('slidetransitionend', () => notify(false));
                         window.Reveal.on('ready', () => notify(true));
+
+                        // Tab / ARIA changes detection (for Quarto panel-tabset and Bootstrap tabs)
+                        var tabObserver = new MutationObserver(function(mutations) {
+                            var changed = false;
+                            for (var i = 0; i < mutations.length; i++) {
+                                if (mutations[i].attributeName === 'aria-selected') {
+                                    changed = true;
+                                    break;
+                                }
+                            }
+                            if (changed) {
+                                window.parent.postMessage({
+                                    type: 'TAB_CHANGED',
+                                    tabScope: getActiveTabScope()
+                                }, '*');
+                                notify(false);
+                            }
+                        });
+                        tabObserver.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-selected'] });
+
                         document.addEventListener('tabby', () => {
                             window.parent.postMessage({
                                 type: 'TAB_CHANGED',
