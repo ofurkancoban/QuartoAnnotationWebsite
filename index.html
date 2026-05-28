@@ -3049,6 +3049,7 @@ h1, h2, h3 {
 </style>
 </head>
 <body>
+<script>window.EXCALIDRAW_ASSET_PATH = 'excalidraw-widget/dist/';</script>
 <script src="excalidraw-widget/dist/quarto-ink-excalidraw.js?v=74"></script>
     <script>
     (function() {
@@ -4623,6 +4624,7 @@ function loadScriptOnce(src) {
 }
 
 async function ensureExcalidrawRuntime() {
+    window.EXCALIDRAW_ASSET_PATH = 'excalidraw-widget/dist/';
     const src = 'excalidraw-widget/dist/quarto-ink-excalidraw.js?v=74';
     const vm = src.match(/[?&]v=([^&]+)/);
     const wantV = vm ? vm[1] : '';
