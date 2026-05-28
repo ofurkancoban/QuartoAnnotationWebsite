@@ -7072,10 +7072,24 @@ function zoompleShow(clientX, clientY) {
     ZOOMPLE.active = true;
 
     // Clone the iframe source so the lens shows the same slide
-    const currentSrc = srcIframe.src || srcIframe.getAttribute('src') || '';
-    if (currentSrc && ZOOMPLE.iframeSrc !== currentSrc) {
-        ZOOMPLE.iframeSrc = currentSrc;
-        lensIframe.src = currentSrc;
+    let currentSrc = srcIframe.src || srcIframe.getAttribute('src') || '';
+    let slideHash = '';
+    try {
+        slideHash = srcIframe.contentWindow.location.hash || '';
+    } catch(e) {}
+    
+    let baseSrc = currentSrc.split('#')[0];
+    let newSrc = baseSrc + slideHash;
+
+    if (newSrc && ZOOMPLE.iframeSrc !== newSrc) {
+        ZOOMPLE.iframeSrc = newSrc;
+        lensIframe.src = newSrc;
+    } else {
+        try {
+            if (lensIframe.contentWindow && lensIframe.contentWindow.location.hash !== slideHash) {
+                lensIframe.contentWindow.location.hash = slideHash;
+            }
+        } catch(e) {}
     }
 
     const srcRect = srcIframe.getBoundingClientRect();
