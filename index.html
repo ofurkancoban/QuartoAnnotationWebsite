@@ -8796,7 +8796,7 @@ function setupEventListeners() {
                 pillIcon.setAttribute('viewBox', toolIcon.getAttribute('viewBox') || '0 0 24 24');
             }
             if (state.annotationEngine === 'excalidraw') {
-                const nextOpen = wasSameTool ? !wasPanelOpen : true;
+                const nextOpen = t === 'magnifier' ? false : (wasSameTool ? !wasPanelOpen : true);
                 setQuartoExcalToolPanelOpen(nextOpen);
                 const tsBtn = _$('#btn-tool-settings');
                 if (tsBtn) tsBtn.classList.toggle('open', nextOpen);
