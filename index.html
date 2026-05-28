@@ -3439,6 +3439,10 @@ function syncModeUI() {
         ) {
             canvasPe = 'none';
         }
+        // Magnifier needs the canvas overlay to capture clicks (even in Excalidraw mode)
+        if (state.isDrawingMode && state.tool === 'magnifier') {
+            canvasPe = 'auto';
+        }
         canvas.style.pointerEvents = canvasPe;
     }
     const appRoot = _$('#app');
@@ -3457,8 +3461,10 @@ function syncModeUI() {
         const inkOnTop = showEx && excalidrawUsesInkCanvasInteractions();
         const excForPenLike = showEx && !inkOnTop;
         const excForInkToolPanel = inkOnTop && state.excalToolPanelOpen;
-        const canInteractWithExcal =
+        let canInteractWithExcal =
             state.isDrawingMode && (excForPenLike || excForInkToolPanel);
+        // Magnifier should NOT interact with Excalidraw — block its pointer events
+        if (state.tool === 'magnifier') canInteractWithExcal = false;
         excHost.style.pointerEvents = canInteractWithExcal ? 'auto' : 'none';
         const hideNativeCursor = showEx && (state.tool === 'eraser' || state.tool === 'pen' || state.tool === 'highlighter');
         excHost.querySelectorAll('canvas.excalidraw__canvas').forEach((cv) => {
@@ -4691,6 +4697,8 @@ function flushExcalidrawSceneToStorageForCurrentKey() {
 
 function queueApplyQuartoExcalidrawToolFromState() {
     if (state.annotationEngine !== 'excalidraw') return;
+    // Magnifier is host-only — don't push it to Excalidraw (it would fall back to freedraw/pen)
+    if (state.tool === 'magnifier') return;
     const apply = () => {
         if (window.QuartoInkExcalidraw && typeof window.QuartoInkExcalidraw.applyQuartoTool === 'function') {
             window.QuartoInkExcalidraw.applyQuartoTool(state.tool);
@@ -7078,6 +7086,8 @@ function startDrawing(e) {
 
 function draw(e) {
     if (isFingerTouchPointer(e)) { e.preventDefault(); return; }
+    // Magnifier does not draw — only cursor update needed
+    if (state.tool === 'magnifier') return;
     // Ignore events from other pointers during active drawing
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
     e.preventDefault();
