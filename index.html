@@ -5437,7 +5437,7 @@ window.processFileContent = function(content, file) {
                 try {
                     try { window.parent.postMessage({type:'BRIDGE_LOG', msg:'Bridge: Script injected'}, '*'); } catch(_e) {}
                     /** Same selector list as CLICK_TAB resolution — order stable within active slide root only. */
-                    var TAB_PROXY_SELECTOR = '[role="tab"], button.tabby-toggle, a.tabby-toggle, .panel-tabset-tabby a[href], .panel-tabset-tabby button, ul.panel-tabset-tabby > li > a, ul.panel-tabset-tabby > li > button, [role="tablist"] a[href], [role="tablist"] button[role="tab"], .nav-tabs a, .nav-tabs button[role="tab"], .nav-link[href^="#"], a[data-bs-toggle="tab"], button[data-bs-toggle="tab"], .nav-tabs li > a, .nav-tabs li > button, .controls-arrow';
+                    var TAB_PROXY_SELECTOR = '[role="tab"], button.tabby-toggle, a.tabby-toggle, .panel-tabset-tabby a[href], .panel-tabset-tabby button, ul.panel-tabset-tabby > li > a, ul.panel-tabset-tabby > li > button, [role="tablist"] a[href], [role="tablist"] button[role="tab"], .nav-tabs a, .nav-tabs button[role="tab"], .nav-link[href^="#"], a[data-bs-toggle="tab"], button[data-bs-toggle="tab"], .nav-tabs li > a, .nav-tabs li > button';
                     function getFallbackSlides() {
                         const slidesRoot = document.querySelector('.slides');
                         if (!slidesRoot) return [];
@@ -5540,28 +5540,25 @@ window.processFileContent = function(content, file) {
                             }
                         } catch (_e) {}
 
-                        // Broad search for active elements that might be tabs
-                        // Quarto/Bootstrap uses .active, aria-selected="true", or .show for active tabs/panels
-                        var activeSelector = '.active, [aria-selected="true"], .show, .tabby-toggle[aria-expanded="true"]';
-                        var candidates = Array.from(root.querySelectorAll(activeSelector));
-                        
-                        // Filter for elements that match our known tab selectors or have a tab role
-                        var activeTabs = candidates.filter(function(el) {
-                            return el.matches(TAB_PROXY_SELECTOR) || el.getAttribute('role') === 'tab';
-                        });
+                        // Find all tabsets on the current slide
+                        var tabsets = root.querySelectorAll('[role="tablist"], ul.panel-tabset-tabby, .nav-tabs');
+                        if (tabsets.length === 0) return '';
 
-                        if (activeTabs.length === 0) return '';
-                        
-                        var scopeParts = activeTabs.map(function(tab, index) {
-                            var id = tab.getAttribute('id') || '';
-                            var href = tab.getAttribute('href') || '';
-                            var label = (tab.textContent || '').trim().substring(0, 30);
-                            // If no ID/href/label, use its position in the list to help uniqueness
-                            return [id || ('tab-' + index), href, label].filter(Boolean).join('|');
-                        });
-                        
-                        // Sort parts to ensure the same set of active tabs always produces the same key
-                        return scopeParts.sort().join('::');
+                        var scopeParts = [];
+                        for (var t = 0; t < tabsets.length; t++) {
+                            var tablist = tabsets[t];
+                            // Within each tabset, find the currently active tab button
+                            var activeTab = tablist.querySelector('[aria-selected="true"], .active[role="tab"], a.active, button.active, .tabby-toggle[aria-expanded="true"]');
+                            if (!activeTab) continue;
+                            // Build a unique ID from the tab's href (most reliable), id, or text
+                            var href = activeTab.getAttribute('href') || '';
+                            var id = activeTab.getAttribute('id') || '';
+                            var label = (activeTab.textContent || '').trim().substring(0, 40);
+                            var key = href || id || label || ('tabset-' + t + '-unknown');
+                            scopeParts.push(key);
+                        }
+
+                        return scopeParts.join('::');
                     }
 
                     window.__annotatorGetActiveTabScope = getActiveTabScope;
@@ -6296,15 +6293,26 @@ window.addEventListener('message', e => {
         });
     }
     if (e.data.type === 'TAB_CHANGED') {
-        console.log('[Parent] TAB_CHANGED received, scope:', e.data.tabScope);
+        var prevScope = state.currentTabScope;
+        var nextScope = (typeof e.data.tabScope === 'string') ? e.data.tabScope.trim() : '';
+        console.log('[Parent] TAB_CHANGED received, prev:', prevScope, 'next:', nextScope);
+        // Always flush the current scene before switching tabs
         flushExcalidrawSceneToStorageForCurrentKey();
-        if (setCurrentTabScope(e.data.tabScope)) {
-            redraw();
-            updateSidebar();
-            if (state.annotationEngine === 'excalidraw') {
-                requestAnimationFrame(() => { syncAnnotationEngineMount(); });
-                scheduleSyncAnnotationEngineMount();
-            }
+        // Always force unmount BEFORE updating scope — this ensures the
+        // React component doesn't fire its debounced onChange with stale data
+        // after we've already switched the annotation key.
+        if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw) {
+            window.QuartoInkExcalidraw.unmount();
+            state.lastMountedSlideKey = null;
+        }
+        setCurrentTabScope(nextScope);
+        redraw();
+        updateSidebar();
+        if (state.annotationEngine === 'excalidraw') {
+            // Small delay to let DOM settle after the unmount
+            setTimeout(function() {
+                syncAnnotationEngineMount();
+            }, 30);
         }
     }
     if (e.data.type === 'BRIDGE_READY_FOR_FOCUS') {
@@ -6331,13 +6339,26 @@ window.addEventListener('message', e => {
         const h = e.data.indexh != null ? e.data.indexh : 0;
         const v = e.data.indexv != null ? e.data.indexv : 0;
         const key = `${h}-${v}`;
-        flushExcalidrawSceneToStorageForCurrentKey();
-        const scopeChanged = setCurrentTabScope(e.data.tabScope);
-        if (state.currentSlide === key && e.data.type !== 'INIT_STATE' && !scopeChanged) {
+        
+        const nextScope = (typeof e.data.tabScope === 'string') ? e.data.tabScope.trim() : '';
+        const slideChanged = state.currentSlide !== key;
+        const scopeChanged = state.currentTabScope !== nextScope;
+
+        if (slideChanged || scopeChanged || e.data.type === 'INIT_STATE') {
+            flushExcalidrawSceneToStorageForCurrentKey();
+            // Force unmount BEFORE updating slide/scope so debounced saves don't overwrite state
+            if (state.annotationEngine === 'excalidraw' && window.QuartoInkExcalidraw) {
+                window.QuartoInkExcalidraw.unmount();
+                state.lastMountedSlideKey = null;
+            }
+        } else {
+            // No slide or scope change, just layout sync & redraw
             scheduleExcalidrawMetricsLayoutSync();
             redraw();
             return;
         }
+
+        setCurrentTabScope(nextScope);
         state.currentSlide = key; 
         state.slideCount = e.data.total;
         if (e.data.slides) state.slides = e.data.slides;
@@ -7982,14 +8003,21 @@ async function exportAnnotatedPresentation() {
                 if (slideEl) root = slideEl;
             }
         } catch (e) {}
-        var activeTabs = Array.from(root.querySelectorAll('[role="tab"][aria-selected="true"]'));
-        if (activeTabs.length === 0) return '';
-        return activeTabs.map(function(tab, index) {
-            var id = tab.getAttribute('id') || '';
-            var href = tab.getAttribute('href') || '';
-            var label = (tab.textContent || '').trim();
-            return [id || ('tab-' + index), href, label].filter(Boolean).join('|');
-        }).join('::');
+        var tabsets = root.querySelectorAll('[role="tablist"], ul.panel-tabset-tabby, .nav-tabs');
+        if (tabsets.length === 0) return '';
+
+        var scopeParts = [];
+        for (var t = 0; t < tabsets.length; t++) {
+            var tablist = tabsets[t];
+            var activeTab = tablist.querySelector('[aria-selected="true"], .active[role="tab"], a.active, button.active, .tabby-toggle[aria-expanded="true"]');
+            if (!activeTab) continue;
+            var href = activeTab.getAttribute('href') || '';
+            var id = activeTab.getAttribute('id') || '';
+            var label = (activeTab.textContent || '').trim().substring(0, 40);
+            var key = href || id || label || ('tabset-' + t + '-unknown');
+            scopeParts.push(key);
+        }
+        return scopeParts.join('::');
     }
 
     function getAnnotationKey(slideKey, tabScope) {
@@ -8002,6 +8030,9 @@ async function exportAnnotatedPresentation() {
         var key = getAnnotationKey(slideKey, tabScope);
         var exact = annData.get(key);
         if (exact && exact.length) return exact;
+
+        // If a tab scope is active, do not bleed slide-level drawings onto it
+        if (tabScope) return [];
 
         var plain = annData.get(slideKey);
         if (plain && plain.length) return plain;
@@ -8024,7 +8055,10 @@ async function exportAnnotatedPresentation() {
 
         var tabScope = getActiveTabScope();
         var scoped = tabScope ? slideKey + '::tab:' + tabScope : slideKey;
-        var ent = excalSvgMap.get(scoped) || excalSvgMap.get(slideKey);
+        var ent = excalSvgMap.get(scoped);
+        if (!ent && !tabScope) {
+            ent = excalSvgMap.get(slideKey);
+        }
         
         if (!ent) { 
             if (box.innerHTML !== '') box.innerHTML = ''; 
@@ -8081,11 +8115,29 @@ async function exportAnnotatedPresentation() {
 
         // Tab / ARIA changes inside any slide (not only the first tablist in the document)
         var observer = new MutationObserver(function(mutations) {
+            var needsUpdate = false;
             for (var i = 0; i < mutations.length; i++) {
-                if (mutations[i].attributeName === 'aria-selected') { scheduleRedraw(); return; }
+                var attr = mutations[i].attributeName;
+                if (attr === 'aria-selected' || attr === 'class' || attr === 'aria-expanded') {
+                    needsUpdate = true;
+                    break;
+                }
             }
+            if (needsUpdate) scheduleRedraw();
         });
-        observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['aria-selected'] });
+        observer.observe(document.body, { 
+            attributes: true, 
+            subtree: true, 
+            attributeFilter: ['aria-selected', 'class', 'aria-expanded'] 
+        });
+
+        document.addEventListener('click', function(e) {
+            var target = e.target;
+            var tabProxySelector = '[role="tab"], button.tabby-toggle, a.tabby-toggle, .panel-tabset-tabby a[href], .panel-tabset-tabby button, ul.panel-tabset-tabby > li > a, ul.panel-tabset-tabby > li > button, [role="tablist"] a[href], [role="tablist"] button[role="tab"], .nav-tabs a, .nav-tabs button[role="tab"], .nav-link[href^="#"], a[data-bs-toggle="tab"], button[data-bs-toggle="tab"], .nav-tabs li > a, .nav-tabs li > button';
+            if (target && target.closest && target.closest(tabProxySelector)) {
+                setTimeout(scheduleRedraw, 100);
+            }
+        }, true);
 
         scheduleRedraw();
         setTimeout(scheduleRedraw, 500);
