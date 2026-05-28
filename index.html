@@ -1476,12 +1476,20 @@ h1, h2, h3 {
     display: block;
     opacity: 1;
 }
-#zoomple-lens-iframe {
+#zoomple-lens-iframe,
+#zoomple-lens-canvas {
     position: absolute;
     border: none;
     transform-origin: 0 0;
     pointer-events: none;
+    background: transparent;
+}
+#zoomple-lens-iframe {
     background: white;
+    z-index: 0;
+}
+#zoomple-lens-canvas {
+    z-index: 1;
 }
 /* Crosshair in lens center */
 #zoomple-lens::after {
@@ -3323,7 +3331,10 @@ h1, h2, h3 {
                     <iframe id="content-frame" title="Presentation Viewer"></iframe>
                     <canvas id="canvas-overlay"></canvas>
                     <!-- Zoomple Magnifier Lens -->
-                    <div id="zoomple-lens"><iframe id="zoomple-lens-iframe" title="Magnifier Zoom"></iframe></div>
+                    <div id="zoomple-lens">
+                        <iframe id="zoomple-lens-iframe" title="Magnifier Zoom"></iframe>
+                        <canvas id="zoomple-lens-canvas"></canvas>
+                    </div>
                     <div id="eraser-cursor"></div>
                     <div id="brush-preview"></div>
                     <textarea id="text-input-overlay"></textarea>
@@ -7060,8 +7071,31 @@ const ZOOMPLE = {
     LENS_SIZE: 250,
     active: false,
     iframeSrc: null,
-    _moveHandler: null
+    _moveHandler: null,
+    _raf: null
 };
+
+function zoompleRenderCanvas() {
+    if (!ZOOMPLE.active) {
+        ZOOMPLE._raf = null;
+        return;
+    }
+    const lensCanvas = _$('#zoomple-lens-canvas');
+    if (lensCanvas) {
+        const ctx = lensCanvas.getContext('2d');
+        ctx.clearRect(0, 0, lensCanvas.width, lensCanvas.height);
+        
+        const sourceCanvases = document.querySelectorAll('#editor-stage canvas:not(#zoomple-lens-canvas)');
+        sourceCanvases.forEach(src => {
+            if (src.offsetWidth > 0 && src.offsetHeight > 0 && src.style.display !== 'none' && src.style.visibility !== 'hidden') {
+                try {
+                    ctx.drawImage(src, 0, 0, lensCanvas.width, lensCanvas.height);
+                } catch(e) {}
+            }
+        });
+    }
+    ZOOMPLE._raf = requestAnimationFrame(zoompleRenderCanvas);
+}
 
 function zoompleShow(clientX, clientY) {
     const lens = _$('#zoomple-lens');
@@ -7099,6 +7133,19 @@ function zoompleShow(clientX, clientY) {
     lensIframe.style.width = srcRect.width + 'px';
     lensIframe.style.height = srcRect.height + 'px';
     lensIframe.style.transform = 'scale(' + zf + ')';
+
+    const lensCanvas = _$('#zoomple-lens-canvas');
+    if (lensCanvas) {
+        lensCanvas.width = srcRect.width;
+        lensCanvas.height = srcRect.height;
+        lensCanvas.style.width = srcRect.width + 'px';
+        lensCanvas.style.height = srcRect.height + 'px';
+        lensCanvas.style.transform = 'scale(' + zf + ')';
+    }
+
+    if (!ZOOMPLE._raf) {
+        ZOOMPLE._raf = requestAnimationFrame(zoompleRenderCanvas);
+    }
 
     lens.classList.add('zp-visible');
 
@@ -7153,6 +7200,12 @@ function zoompleMove(clientX, clientY) {
 
     lensIframe.style.left = iframeLeft + 'px';
     lensIframe.style.top = iframeTop + 'px';
+    
+    const canvasOv = _$('#zoomple-lens-canvas');
+    if (canvasOv) {
+        canvasOv.style.left = iframeLeft + 'px';
+        canvasOv.style.top = iframeTop + 'px';
+    }
 }
 
 function zoompleHide() {
