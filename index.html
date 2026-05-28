@@ -7081,21 +7081,33 @@ function zoompleRenderCanvas() {
         return;
     }
 
-    // Sync tab states from src to lens
+    // Sync tab states from src to lens (supports Bootstrap and Quarto Tabby)
     try {
         const srcDoc = _$('#content-frame').contentDocument;
         const lensDoc = _$('#zoomple-lens-iframe').contentDocument;
         if (srcDoc && lensDoc) {
-            const srcTabs = srcDoc.querySelectorAll('.tab-pane, .nav-link');
-            const lensTabs = lensDoc.querySelectorAll('.tab-pane, .nav-link');
-            for (let i = 0; i < srcTabs.length; i++) {
-                if (lensTabs[i]) {
-                    lensTabs[i].classList.toggle('active', srcTabs[i].classList.contains('active'));
-                    lensTabs[i].classList.toggle('show', srcTabs[i].classList.contains('show'));
-                    const aria = srcTabs[i].getAttribute('aria-selected');
-                    if (aria !== null) lensTabs[i].setAttribute('aria-selected', aria);
+            const roles = ['tab', 'tabpanel'];
+            roles.forEach(role => {
+                const srcEls = srcDoc.querySelectorAll(`[role="${role}"]`);
+                const lensEls = lensDoc.querySelectorAll(`[role="${role}"]`);
+                for (let i = 0; i < srcEls.length; i++) {
+                    if (lensEls[i]) {
+                        // Sync Quarto Tabby attributes
+                        const attrsToSync = ['aria-selected', 'aria-hidden', 'aria-expanded'];
+                        attrsToSync.forEach(attr => {
+                            const val = srcEls[i].getAttribute(attr);
+                            if (val !== null) lensEls[i].setAttribute(attr, val);
+                            else lensEls[i].removeAttribute(attr);
+                        });
+                        
+                        if (srcEls[i].hasAttribute('hidden')) lensEls[i].setAttribute('hidden', '');
+                        else lensEls[i].removeAttribute('hidden');
+                        
+                        // Sync class names for standard styling (Bootstrap etc)
+                        lensEls[i].className = srcEls[i].className;
+                    }
                 }
-            }
+            });
         }
     } catch(e) {}
 
