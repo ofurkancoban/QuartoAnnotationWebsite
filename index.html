@@ -1452,6 +1452,60 @@ h1, h2, h3 {
     cursor: zoom-in !important;
 }
 
+/* ── Zoomple Magnifier Lens ─────────────────────────────── */
+#zoomple-lens {
+    position: fixed;
+    width: 250px;
+    height: 250px;
+    border-radius: 50%;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 99999;
+    display: none;
+    box-shadow:
+        0 0 0 3px rgba(255,255,255,0.85),
+        0 0 0 5px rgba(0,0,0,0.3),
+        0 8px 32px rgba(0,0,0,0.35),
+        inset 0 0 40px rgba(255,255,255,0.08);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    /* Glass highlight shimmer */
+    background: radial-gradient(ellipse at 30% 25%, rgba(255,255,255,0.15) 0%, transparent 60%);
+}
+#zoomple-lens.zp-visible {
+    display: block;
+    opacity: 1;
+}
+#zoomple-lens-iframe {
+    position: absolute;
+    border: none;
+    transform-origin: 0 0;
+    pointer-events: none;
+    background: white;
+}
+/* Crosshair in lens center */
+#zoomple-lens::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 16px; height: 16px;
+    transform: translate(-50%, -50%);
+    border: 1.5px solid rgba(0,0,0,0.35);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 2;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.5);
+}
+#zoomple-lens::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 3;
+    background: radial-gradient(ellipse at 30% 25%, rgba(255,255,255,0.18) 0%, transparent 55%);
+}
+
 #excalidraw-host {
     position: absolute;
     inset: 0;
@@ -3268,6 +3322,8 @@ h1, h2, h3 {
                     <div id="editor-stage" class="editor-stage">
                     <iframe id="content-frame" title="Presentation Viewer"></iframe>
                     <canvas id="canvas-overlay"></canvas>
+                    <!-- Zoomple Magnifier Lens -->
+                    <div id="zoomple-lens"><iframe id="zoomple-lens-iframe" title="Magnifier Zoom"></iframe></div>
                     <div id="eraser-cursor"></div>
                     <div id="brush-preview"></div>
                     <textarea id="text-input-overlay"></textarea>
@@ -3418,6 +3474,8 @@ function excalidrawUsesInkCanvasInteractions() {
 }
 
 function syncModeUI() {
+    // Auto-hide magnifier lens when switching tools
+    if (state.tool !== 'magnifier' && typeof zoompleHide === 'function') zoompleHide();
     const badge = _$('#mode-badge');
     if (badge) {
         badge.textContent = state.isDrawingMode ? 'DRAWING' : 'NAVIGATING';
@@ -6626,6 +6684,8 @@ function onExcalEraserTailPointerUpOrCancel() {
 }
 
 function navigateSlide(dir) {
+    // Auto-hide magnifier lens on slide change
+    if (typeof zoompleHide === 'function') zoompleHide();
     const f = state.ui.frame || _$('#content-frame');
     if (!f || !f.contentWindow) {
         window.log('Navigation failed: content frame not ready', 'error');
@@ -6994,23 +7054,112 @@ function resetDrawingGestureState() {
     if (ctx) redraw();
 }
 
+/* ── Zoomple Magnifier Lens Logic ─────────────────────────── */
+const ZOOMPLE = {
+    ZOOM_FACTOR: 2,
+    LENS_SIZE: 250,
+    active: false,
+    iframeSrc: null,
+    _moveHandler: null
+};
+
+function zoompleShow(clientX, clientY) {
+    const lens = _$('#zoomple-lens');
+    const lensIframe = _$('#zoomple-lens-iframe');
+    const srcIframe = _$('#content-frame');
+    if (!lens || !lensIframe || !srcIframe) return;
+
+    ZOOMPLE.active = true;
+
+    // Clone the iframe source so the lens shows the same slide
+    const currentSrc = srcIframe.src || srcIframe.getAttribute('src') || '';
+    if (currentSrc && ZOOMPLE.iframeSrc !== currentSrc) {
+        ZOOMPLE.iframeSrc = currentSrc;
+        lensIframe.src = currentSrc;
+    }
+
+    const srcRect = srcIframe.getBoundingClientRect();
+    const zf = ZOOMPLE.ZOOM_FACTOR;
+
+    // Size the inner iframe to match the source, then scale it
+    lensIframe.style.width = srcRect.width + 'px';
+    lensIframe.style.height = srcRect.height + 'px';
+    lensIframe.style.transform = 'scale(' + zf + ')';
+
+    lens.classList.add('zp-visible');
+
+    zoompleMove(clientX, clientY);
+
+    // Attach mousemove listener to canvas overlay
+    if (!ZOOMPLE._moveHandler) {
+        ZOOMPLE._moveHandler = function(ev) {
+            if (ZOOMPLE.active && state.tool === 'magnifier') {
+                zoompleMove(ev.clientX, ev.clientY);
+            }
+        };
+        const canvasOv = _$('#canvas-overlay');
+        if (canvasOv) canvasOv.addEventListener('pointermove', ZOOMPLE._moveHandler);
+        document.addEventListener('pointermove', ZOOMPLE._moveHandler);
+    }
+}
+
+function zoompleMove(clientX, clientY) {
+    const lens = _$('#zoomple-lens');
+    const lensIframe = _$('#zoomple-lens-iframe');
+    const srcIframe = _$('#content-frame');
+    if (!lens || !lensIframe || !srcIframe || !ZOOMPLE.active) return;
+
+    const srcRect = srcIframe.getBoundingClientRect();
+    const zf = ZOOMPLE.ZOOM_FACTOR;
+    const half = ZOOMPLE.LENS_SIZE / 2;
+
+    // Position lens centered on cursor, with slight offset for visibility
+    let lensX = clientX - half;
+    let lensY = clientY - half;
+
+    // Keep lens within viewport
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (lensX < 0) lensX = 0;
+    if (lensY < 0) lensY = 0;
+    if (lensX + ZOOMPLE.LENS_SIZE > vw) lensX = vw - ZOOMPLE.LENS_SIZE;
+    if (lensY + ZOOMPLE.LENS_SIZE > vh) lensY = vh - ZOOMPLE.LENS_SIZE;
+
+    lens.style.left = lensX + 'px';
+    lens.style.top = lensY + 'px';
+
+    // Calculate where cursor is relative to the source iframe
+    const relX = clientX - srcRect.left;
+    const relY = clientY - srcRect.top;
+
+    // Position the zoomed iframe so the cursor point maps to lens center
+    // Scaled content offset: -(relativePos * zoomFactor) + halfLens
+    const iframeLeft = -(relX * zf) + half;
+    const iframeTop = -(relY * zf) + half;
+
+    lensIframe.style.left = iframeLeft + 'px';
+    lensIframe.style.top = iframeTop + 'px';
+}
+
+function zoompleHide() {
+    const lens = _$('#zoomple-lens');
+    if (lens) lens.classList.remove('zp-visible');
+    ZOOMPLE.active = false;
+}
+
+function zoompleToggle(clientX, clientY) {
+    if (ZOOMPLE.active) {
+        zoompleHide();
+    } else {
+        zoompleShow(clientX, clientY);
+    }
+}
+
 function startDrawing(e) {
     if (!state.isDrawingMode) return;
     if (state.tool === 'magnifier') {
         e.preventDefault();
-        const clientX = e.clientX;
-        const clientY = e.clientY;
-        const iframe = _$('#content-frame');
-        if (iframe) {
-            const rect = iframe.getBoundingClientRect();
-            const xInIframe = clientX - rect.left;
-            const yInIframe = clientY - rect.top;
-            iframe.contentWindow.postMessage({
-                type: 'TOGGLE_ZOOM',
-                x: xInIframe,
-                y: yInIframe
-            }, '*');
-        }
+        zoompleToggle(e.clientX, e.clientY);
         return;
     }
     if (!isFingerTouchPointer(e)) {
@@ -7086,8 +7235,11 @@ function startDrawing(e) {
 
 function draw(e) {
     if (isFingerTouchPointer(e)) { e.preventDefault(); return; }
-    // Magnifier does not draw — only cursor update needed
-    if (state.tool === 'magnifier') return;
+    // Magnifier: update lens position instead of drawing
+    if (state.tool === 'magnifier') {
+        if (ZOOMPLE.active) zoompleMove(e.clientX, e.clientY);
+        return;
+    }
     // Ignore events from other pointers during active drawing
     if (state.isDragging && state.activePointerId !== undefined && state.activePointerId !== e.pointerId) return;
     e.preventDefault();
