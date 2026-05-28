@@ -7080,6 +7080,25 @@ function zoompleRenderCanvas() {
         ZOOMPLE._raf = null;
         return;
     }
+
+    // Sync tab states from src to lens
+    try {
+        const srcDoc = _$('#content-frame').contentDocument;
+        const lensDoc = _$('#zoomple-lens-iframe').contentDocument;
+        if (srcDoc && lensDoc) {
+            const srcTabs = srcDoc.querySelectorAll('.tab-pane, .nav-link');
+            const lensTabs = lensDoc.querySelectorAll('.tab-pane, .nav-link');
+            for (let i = 0; i < srcTabs.length; i++) {
+                if (lensTabs[i]) {
+                    lensTabs[i].classList.toggle('active', srcTabs[i].classList.contains('active'));
+                    lensTabs[i].classList.toggle('show', srcTabs[i].classList.contains('show'));
+                    const aria = srcTabs[i].getAttribute('aria-selected');
+                    if (aria !== null) lensTabs[i].setAttribute('aria-selected', aria);
+                }
+            }
+        }
+    } catch(e) {}
+
     const lensCanvas = _$('#zoomple-lens-canvas');
     if (lensCanvas) {
         const ctx = lensCanvas.getContext('2d');
