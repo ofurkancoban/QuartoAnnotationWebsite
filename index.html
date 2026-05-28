@@ -7092,19 +7092,27 @@ function zoompleRenderCanvas() {
                 const lensEls = lensDoc.querySelectorAll(`[role="${role}"]`);
                 for (let i = 0; i < srcEls.length; i++) {
                     if (lensEls[i]) {
-                        // Sync Quarto Tabby attributes
+                        // Sync Quarto Tabby attributes only if changed
                         const attrsToSync = ['aria-selected', 'aria-hidden', 'aria-expanded'];
                         attrsToSync.forEach(attr => {
                             const val = srcEls[i].getAttribute(attr);
-                            if (val !== null) lensEls[i].setAttribute(attr, val);
-                            else lensEls[i].removeAttribute(attr);
+                            const currentVal = lensEls[i].getAttribute(attr);
+                            if (val !== currentVal) {
+                                if (val !== null) lensEls[i].setAttribute(attr, val);
+                                else lensEls[i].removeAttribute(attr);
+                            }
                         });
                         
-                        if (srcEls[i].hasAttribute('hidden')) lensEls[i].setAttribute('hidden', '');
-                        else lensEls[i].removeAttribute('hidden');
+                        const hasHidden = srcEls[i].hasAttribute('hidden');
+                        if (hasHidden !== lensEls[i].hasAttribute('hidden')) {
+                            if (hasHidden) lensEls[i].setAttribute('hidden', '');
+                            else lensEls[i].removeAttribute('hidden');
+                        }
                         
-                        // Sync class names for standard styling (Bootstrap etc)
-                        lensEls[i].className = srcEls[i].className;
+                        // Sync class names only if changed
+                        if (lensEls[i].className !== srcEls[i].className) {
+                            lensEls[i].className = srcEls[i].className;
+                        }
                     }
                 }
             });
