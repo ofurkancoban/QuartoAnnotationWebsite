@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ofurkancoban.github.io/QuartoAnnotationWebsite/">
+  <a href="https://quarto.ink/">
     <img src="https://img.shields.io/badge/Live%20Demo-Open%20Quarto%20Ink-success?style=for-the-badge&logo=rocket" alt="Live Demo">
   </a>
   <img src="https://img.shields.io/badge/Privacy-100%25%20Local-blue?style=for-the-badge" alt="Privacy">
